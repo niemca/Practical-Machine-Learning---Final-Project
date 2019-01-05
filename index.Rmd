@@ -1,0 +1,165 @@
+---
+title: "Practical Machine Learning - Final Project"
+author: "Nicolas Calicchio"
+date: "January 4, 2019"
+output: html_document
+---
+    
+    ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The objective of the present work is to use data collected from accelerometers on the belt, forearm, arm, and dumbell in an experiment with 6 participants, who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+After doing some cleaning of the database, several models are trained using the type of barbell lifts ('classe') as the outcome and 53 potential predictive variables. These models are estimated using four different kinds of algorithms: classification and regression trees ('rpart'), boosted trees ('gbm'), linear discriminant analysis ('lda') and support vector machines ('svm'). A fifth option is also explored, which consists on a combination of the four models using the random forest ('rf') algorithm.
+
+Then the performance and efficiency of these five options is evaluated through the accuracy measure and the processing time, respectively. Finally, some conclusions are drawn from the results and one of the models is selected for the Course Prediction Project.
+
+## Database and exploratory analysis
+
+First, we import the training and testing datasets from the following links:
+    
+    ```{r}
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+The first thing to notice about the dataset is that there are several columns that are  almost completely blank. These columns won't be considered for the development of the model. The remaining 86 variables have no missing values.
+
+The training database is partitioned into a training set and a testing set for cross validation purposes. The recommended percentages for medium sample size are used (60% training and 40% testing).
+
+```{r}
+training_clean <- training[ , 8:160]
+training_clean <- training_clean[(colSums(is.na(training_clean) == FALSE)/nrow(training_clean)) > 0.5]
+training_clean <- training_clean[(1 - (colSums(training_clean == "")/nrow(training_clean))) > 0.5]
+library(caret)
+set.seed(1234)
+inTrain <- createDataPartition(y = training_clean$classe, p = 0.6, list = FALSE)
+training_clean_training <- training_clean[inTrain, ]
+training_clean_testing <- training_clean[-inTrain, ]
+```
+
+Figure I on the Appendix shows a summary of the predicted variable ('classe') and all the potential predictive variables remaining in the training database.
+
+## Model estimation and evaluation
+
+Several types of algorithms are tested for this prediction problem: classification and regression trees ('rpart'), boosted trees ('gbm'), linear discriminant analysis ('lda') and support vector machines ('svm').
+
+```{r}
+library(rpart)
+library(e1071)
+start_rpart <- Sys.time()
+model_rpart <- train(classe ~ ., method = "rpart", data = training_clean_training)
+end_rpart <- Sys.time()
+time_rpart <- end_rpart - start_rpart
+start_gbm <- Sys.time()
+model_gbm <- train(classe ~ ., method = "gbm", data = training_clean_training, verbose = FALSE)
+end_gbm <- Sys.time()
+time_gbm <- end_gbm - start_gbm
+start_lda <- Sys.time()
+model_lda <- train(classe ~ ., method = "lda", data = training_clean_training)
+end_lda <- Sys.time()
+time_lda <- end_lda - start_lda
+start_svm <- Sys.time()
+model_svm <- train(classe ~ ., method = "svmRadial", data = training_clean_training)
+end_svm <- Sys.time()
+time_svm <- end_svm - start_svm
+pred_rpart <- predict(model_rpart, training_clean_training)
+pred_gbm <- predict(model_gbm, training_clean_training)
+pred_lda <- predict(model_lda, training_clean_training)
+pred_svm <- predict(model_svm, training_clean_training)
+training_comb <- data.frame(pred_rpart, pred_gbm, pred_lda, pred_svm, classe = training_clean_training$classe)
+start_comb <- Sys.time()
+model_comb <- train(classe ~ ., method = "rf", data = training_comb)
+end_comb <- Sys.time()
+time_comb <- end_comb - start_comb
+```
+
+The accuracy of each model within the training sample can be found in Figure I below:
+
+### Figure I - Model Accuracy (Training Sample)
+
+```{r}
+accuracy <- data.frame(Model=c("Regression tree", "Boosted trees", "Linear discriminant analysis", "Support vector machines", "Combined model"), Accuracy=c(round(max(head(model_rpart$results)$Accuracy), 5), round(max(head(model_gbm$results)$Accuracy), 5), round(max(head(model_lda$results)$Accuracy), 5), round(max(head(model_svm$results)$Accuracy),5), round(max(head(model_comb$results)$Accuracy),5)))
+accuracy
+```
+
+Clearly, boosted trees and support vector machines perform better than regression trees and linear discriminant analysis. However, the combination of the four models with the random forests algorithm has an even higher accuracy.
+
+These results correspond to the training sample. The out-of-sample prediction capability of the models was also calculated using the accuracy measure in the testing sample:
+
+### Figure II - Model Accuracy (Testing Sample)
+
+```{r}
+pred_rpart_testing <- predict(model_rpart, training_clean_testing)
+pred_gbm_testing <- predict(model_gbm, training_clean_testing)
+pred_lda_testing <- predict(model_lda, training_clean_testing)
+pred_svm_testing <- predict(model_svm, training_clean_testing)
+testing_comb <- data.frame(pred_rpart = pred_rpart_testing, pred_gbm = pred_gbm_testing, pred_lda = pred_lda_testing, pred_svm = pred_svm_testing)
+pred_comb_testing <- predict(model_comb, testing_comb)
+accuracy_testing <- data.frame(Model=c("Regression tree", "Boosted trees", "Linear discriminant analysis", "Support vector machines", "Combined model"), Accuracy=c(round(confusionMatrix(training_clean_testing$classe, pred_rpart_testing)$overall[1], 5), round(confusionMatrix(training_clean_testing$classe, pred_gbm_testing)$overall[1], 5), round(confusionMatrix(training_clean_testing$classe, pred_lda_testing)$overall[1], 5), round(confusionMatrix(training_clean_testing$classe, pred_svm_testing)$overall[1],5), round(confusionMatrix(training_clean_testing$classe, pred_comb_testing)$overall[1],5)))
+accuracy_testing
+```
+
+Figure II above shows that, altough the difference in the performance between boosted trees and the combined model reduces, the latter still presents a slightly higher accuracy. The confusion matrices for the out-of-sample (testing sample) prediction can be found on the Appendix (Figure II).
+
+On the other hand, the processing time of all models was measured, in order to consider efficiency issues. The high-performance models require more time for processing: the support vector machines estimation lasted around 50 minutes, while the boosted trees algorithm required 22 minutos for processing. 
+
+Also, the random forest algorithm used for the combined model estimation took around 9 minutes, but it has to be considered that the results of the rest of the models are the inputs of the combined model. So, in this case, the real proccesing time is the sum of the processing time for all the algorithms (approximately 81 minutes). 
+
+### Figure III - Model Efficiency
+
+```{r}
+processing_time <- data.frame(Model = c("Regression tree", "Boosted trees", "Linear discriminant analysis", "Support vector machines", "Combined model"), Processing_time = c(time_rpart, time_gbm, time_lda, time_svm, time_comb))
+processing_time
+```
+
+The combined model has a better performance at the cost of loosing efficiency in terms of processing time, since its estimation required a much longer lapse. The support vector machines algorithm is discarted, since it is less performant and less efficient than the boosted trees algorithms. The latter has a similar performance than the combined model in the out-of-sample prediction and requires less processing time. For these reasons, the boosted trees algorithm is selected for the Course Prediction Assignment.
+
+## Conclusions
+
+The objective of the present work was to use data about accelerometers on the belt, forearm, arm, and dumbell from an experiment with 6 participants, who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+After doing some cleaning of the database, several models were trained using the type of barbell lifts ('classe') as the outcome and 53 potential predictive variables. Several algorithms were tested: classification and regression trees ('rpart'), boosted trees ('gbm'), linear discriminant analysis ('lda'), support vector machines ('svm') and a combination of all four models with random forests ('rf').
+
+Support vector machines, boosted trees and the combined model were clearly more performant than the other two algorithms. However, the first one was discarted because it was less performant and less efficient.
+
+On the other hand, a trade-off between performance and efficiency was detected in the selection between boosted trees and the combined model. The latter had a better performance on the out-of-sample prediction, but it required around 81 minutes of total processing time, while the former required only 22 minutes. Also, altough the combined model had a higher accuracy in the training and testing samples, the diferrence with respect to the boosted trees performance was reduced in the testing (out-of-sample) dataset. 
+
+Therefore, considering the small performance gain obtained using the combined model and the higher efficiency of the boosted trees algorithm, the latter model was selected as the most suitable one.
+
+## Appendix
+
+### Figure I - Summary Dataset
+
+```{r}
+summary(training_clean_training)
+```
+
+### Figure II - Confusion Matrices
+
+#### Regression and Classification Trees
+```{r}
+confusionMatrix(training_clean_testing$classe, pred_rpart_testing)$table
+```
+
+#### Boosted Trees
+```{r}
+confusionMatrix(training_clean_testing$classe, pred_gbm_testing)$table
+```
+
+#### Linear Discriminant Analysis
+```{r}
+confusionMatrix(training_clean_testing$classe, pred_lda_testing)$table
+```
+#### Support Vector Machines
+```{r}
+confusionMatrix(training_clean_testing$classe, pred_svm_testing)$table
+```
+
+#### Combined Model (Random Forests)
+```{r}
+confusionMatrix(training_clean_testing$classe, pred_comb_testing)$table
+```
